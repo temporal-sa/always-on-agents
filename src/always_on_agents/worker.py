@@ -5,6 +5,11 @@ production so each can scale on its own:
 
     uv run agent-worker                        # all three queues
     uv run agent-worker --queue agent-scheduled
+
+A worker is just a process that polls task queues and runs whatever Workflow
+and Activity tasks it finds. It holds no durable state: stop it at any point
+and start it again (or start several), and Temporal hands out the remaining
+work. That is what the recovery drills exercise.
 """
 
 from __future__ import annotations
@@ -85,6 +90,8 @@ def build_workers(
         workspace.snapshot_workspace,
         workspace.restore_workspace,
     ]
+    # agent(trade-off): every queue registers everything, so the task_queue a caller picks
+    # decides where work runs. Splitting queues across processes needs no code change.
     return [
         Worker(client, task_queue=queue, workflows=WORKFLOWS, activities=activities, activity_executor=executor)
         for queue in queues

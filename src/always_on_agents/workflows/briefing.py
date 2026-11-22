@@ -1,4 +1,20 @@
-"""A briefing turn as a Workflow, and the research job it can call as a tool."""
+"""A briefing turn as a Workflow, and a Workflow that implements a tool.
+
+``BriefingTurnWorkflow`` is what the weekly Schedule starts and what
+``agent turn`` runs: the fine-grained agent loop, then delivery as a separate
+Activity. Keeping delivery separate matters. If the email service is down,
+only delivery retries, on its own policy, and the finished briefing is never
+generated again.
+
+``ResearchWorkflow`` shows a third way to run a slow tool. Instead of one
+long Activity, the tool starts a Workflow and returns its ID at once; the
+agent collects the result later with ``get_research_result``. The research
+job has its own history, retries, and timeouts, and it keeps running even if
+the turn that started it fails.
+
+See it happen: ask the assistant a question that needs research, then open
+the ``research-...`` Workflow in the Temporal UI.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +33,8 @@ with workflow.unsafe.imports_passed_through():
 
 # Delivery is its own job with its own policy: keep trying, back off to a few
 # minutes, and never send twice (the message id is the idempotency key).
+# agent(trade-off): no maximum_attempts on purpose. A briefing should arrive late rather
+# than never, and the message id makes a repeat harmless.
 DELIVERY_RETRY = RetryPolicy(initial_interval=timedelta(seconds=2), maximum_interval=timedelta(minutes=5))
 
 
@@ -44,6 +62,8 @@ class BriefingTurnWorkflow:
         )
         self._stage = "agent loop"
         reply = await self._loop.run([{"role": "user", "content": request.request}])
+        # agent(constraint): write_report (agent/tools.py) saves under the turn id, which is
+        # why the report id can be inferred here. Change both together.
         report_id = turn_id if "write_report" in self._loop.tools_called else None
 
         delivered = False

@@ -13,6 +13,21 @@ recorded, recovery continues with the release.
 
 Temporal coordinates; the application still calls the compute and storage
 APIs, and a waiting Workflow does not itself suspend a VM or stop its charges.
+
+Why the split: an agent's sandbox is expensive to keep and slow to create.
+The pool trades a few idle VMs for instant starts. The lease makes sure that
+giving a VM back never loses work: the save is a recorded step, so a crash
+between "saved" and "released" resumes at the release, not before the save.
+
+What to notice:
+
+* The pool is a control loop: reconcile, then sleep until a tick or a wake-up
+  from a handler. Every provider call in it is an Activity with retries.
+* A claim is an Update, so the caller gets a VM id back, or waits in line.
+* Orphan cleanup covers both directions: VMs claimed by a lease that no longer
+  runs, and VMs the provider has that the pool never recorded.
+
+See it happen: recovery drill 6 in the README, or the Workspace page in the web UI.
 """
 
 from __future__ import annotations
@@ -80,6 +95,8 @@ class WorkspacePoolWorkflow:
 
     @workflow.signal
     def release(self, request: ReleaseRequest) -> None:
+        # agent(invariant): only the current owner can release. A late release from an old
+        # lease must not free a VM that another workspace now holds.
         vm = self._state.vms.get(request.vm_id)
         if vm and vm.owner_workspace == request.workspace_id:
             vm.status = "releasing"
@@ -103,6 +120,9 @@ class WorkspacePoolWorkflow:
             await self._reconcile()
             self._ticks += 1
             due = self._ticks >= self._config.max_ticks_per_run or workflow.info().is_continue_as_new_suggested()
+            # agent(invariant): never Continue-As-New while claims wait. Waiting for
+            # all_handlers_finished would deadlock: a claim finishes only when this loop
+            # provisions a VM.
             if due and not self._claim_queue:
                 # Carry state into a fresh run so history never grows without bound.
                 await workflow.wait_condition(workflow.all_handlers_finished)
@@ -136,6 +156,7 @@ class WorkspacePoolWorkflow:
         for vm_id in report.orphaned_claims:
             vm = vms.get(vm_id)
             # The VM may have been released and claimed again while we checked.
+            # agent(invariant): compare the owner too, or a fresh claim gets reclaimed.
             if vm is None or vm.status != "claimed" or vm.owner_workflow_id != claims[vm_id]:
                 continue
             workflow.logger.info("reclaiming %s: its owner is gone", vm_id)
@@ -153,6 +174,9 @@ class WorkspacePoolWorkflow:
         budget = self._config.max_creates_per_window - len(self._state.recent_creates)
         to_create = max(0, min(wanted, capacity, budget))
         if to_create:
+            # agent(invariant): request ids come from provision_seq, which is carried across
+            # Continue-As-New. The provider deduplicates on them, so a retried provision
+            # returns the same VM.
             request_ids = []
             for _ in range(to_create):
                 self._state.provision_seq += 1
@@ -240,6 +264,8 @@ class WorkspaceLeaseWorkflow:
                 break  # idle long enough
 
         # Save first, and let Temporal record it. Only then release the VM.
+        # agent(invariant): keep this order. Releasing first lets the pool wipe the VM
+        # before its files are saved.
         self._stage = "saving"
         snapshot_id = f"{request.workspace_id}-{workflow.info().run_id[:8]}"
         saved = await workflow.execute_activity_method(

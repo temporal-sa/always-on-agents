@@ -3,6 +3,7 @@
 // (Workflow queries, Activity and Schedule descriptions) and the app's store.
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,48}$/;
+// agent(constraint): the store.maybe_fail("...") names in src/, also listed in the README drills.
 const FAULT_POINTS = ["model_call", "after_model_call", "write_report", "deliver", "publish_memory", "provision_vm", "snapshot_workspace"];
 const SUGGESTIONS = [
   'Send me "hello" in 30 seconds',

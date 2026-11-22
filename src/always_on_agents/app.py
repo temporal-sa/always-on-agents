@@ -3,6 +3,15 @@
 These are thin. They record what the application owns (its database rows) and
 hand the rest to Temporal: start or signal a Workflow, send an Update, read a
 Query. None of them waits for the work itself to finish.
+
+Most of what makes them safe is in the Workflow ID and the conflict policy:
+
+* ``USE_EXISTING``: "make sure it is running". Starting twice is harmless
+  (``ensure_pool``, ``open_workspace``, ``start_session``).
+* ``FAIL``: "start one, and tell me if one is already running"
+  (``consolidate_now``).
+* Signal-with-start: "deliver this, starting the Workflow if needed"
+  (``notify_consolidation``).
 """
 
 from __future__ import annotations
@@ -82,6 +91,8 @@ async def notify_consolidation(
     max_wait: timedelta = timedelta(hours=1),
 ) -> None:
     """Tell the user's consolidation Workflow about a saved interaction (signal-with-start)."""
+    # agent(constraint): batch_size and max_wait apply only when this call starts the run.
+    # A running Workflow keeps the values it started with.
     await client.start_workflow(
         MemoryConsolidationWorkflow.run,
         ConsolidationInput(user_id=user_id, batch_size=batch_size, max_wait_seconds=int(max_wait.total_seconds())),

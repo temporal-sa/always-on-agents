@@ -24,6 +24,23 @@ And the session is wired to the rest of the system:
   it has ended anyway, the note goes to the user's outbox.
 * What the user says is source material for memory: each message is recorded
   and the user's consolidation Workflow is notified.
+
+Why a Workflow and not a chat server's memory: the session outlives any one
+process. A browser can close, the worker can restart, and an approval can sit
+pending for minutes; the session's state lives in Temporal, so all of that
+just resumes.
+
+What to notice:
+
+* Updates have validators. A rejected message or approval never enters the
+  Workflow's history, so a bad request leaves no trace to replay.
+* ``@workflow.init`` builds the state before any handler runs, so a message
+  that arrives together with the start is handled correctly.
+* Long sessions call Continue-As-New and carry a snapshot forward
+  (``_snapshot``), so no single run's history grows without bound.
+
+See it happen: recovery drill 5 in the README, or chat in the web UI while
+restarting the worker.
 """
 
 from __future__ import annotations
@@ -59,8 +76,12 @@ with workflow.unsafe.imports_passed_through():
     from .agent_loop import TOOL_RETRY, WorkflowAgentLoop, execute_tool
     from .briefing import DELIVERY_RETRY
 
+# agent(trade-off): only the newest events and message ids survive Continue-As-New, to
+# bound history size. A client more than 200 events behind skips the older ones.
 EVENTS_CARRIED_ACROSS_RUNS = 200
 SEEN_IDS_CARRIED_ACROSS_RUNS = 500
+# agent(constraint): agent/prompts.py (SESSION_SYSTEM, SET_TIMER) and tests/fake_model.py
+# match this exact text.
 WAKE_UP_PREFIX = "[Automated wake-up]"
 
 
@@ -81,8 +102,8 @@ class SessionWorkflow:
         self._timers: dict[str, PendingTimer] = {t.timer_id: t for t in state.timers}
         self._turn_running = False
         self._closed = False
-        # Emitted here, not in run(): a message that arrives with the start is
-        # handled before run() begins, and must not become event #1.
+        # agent(invariant): emitted here, not in run(). A message that arrives with the
+        # start is handled before run() begins, and must not become event #1.
         if not self._events:
             self._emit("session_started", f"Session for {request.user_id}.")
 
@@ -90,6 +111,8 @@ class SessionWorkflow:
 
     @workflow.update
     def send_message(self, message: SendMessageInput) -> MessageAccepted:
+        # agent(invariant): client_message_id deduplicates at two layers. It is the Update
+        # id (app.send_session_message) within a run, and _seen across Continue-As-New.
         if message.client_message_id in self._seen:
             return MessageAccepted(message.client_message_id, "duplicate")
         self._seen[message.client_message_id] = None
@@ -127,6 +150,8 @@ class SessionWorkflow:
             raise ApplicationError(f"Unknown approval {decision.approval_id}.")
         if approval.status != "pending":
             raise ApplicationError(f"Approval is already {approval.status}.")
+        # agent(invariant): the digest and deadline are checked here and again when the tool
+        # runs (agent/tools.py, _tool_share_report). Both checks are required.
         if decision.digest != approval.digest:
             raise ApplicationError("Digest does not match: approve exactly the action that was shown.")
         if workflow.now() > datetime.fromisoformat(approval.expires_at):
@@ -204,6 +229,8 @@ class SessionWorkflow:
         remember = None
         if queued.get("kind", "user") == "user":
             # Runs alongside the turn; memory never holds up a reply.
+            # agent(invariant): awaited in the finally block below. An Activity still pending
+            # when the run closes or continues as new may never run.
             remember = workflow.start_activity_method(
                 AgentActivities.record_interaction,
                 InteractionRecord(self._request.user_id, turn_id, queued["text"]),
@@ -226,6 +253,8 @@ class SessionWorkflow:
             self._emit("assistant", reply, turn_id=turn_id)
         except (ActivityError, ApplicationError) as err:
             # Keep the conversation valid for the next turn and tell the client.
+            # agent(invariant): the Claude API rejects a conversation with an unanswered
+            # tool_use, so roll back to this turn's user message before replying.
             del self._messages[checkpoint + 1 :]
             self._messages.append({"role": "assistant", "content": "I could not finish that request."})
             self._emit("turn_failed", str(err.cause if isinstance(err, ActivityError) else err), turn_id=turn_id)
@@ -263,7 +292,9 @@ class SessionWorkflow:
             retry_policy=TOOL_RETRY,
             summary=f"set timer: {delay}s",
         )
-        if f"timer:{timer_id}" not in self._seen:  # it may already have fired
+        # agent(invariant): a short timer can fire before this Activity's result is
+        # recorded. Re-adding a fired timer would stop the session from ever closing when idle.
+        if f"timer:{timer_id}" not in self._seen:
             self._timers[timer_id] = PendingTimer(timer_id, note, fires_at)
         self._emit("timer_set", note, timer_id=timer_id, fires_at=fires_at, delay_seconds=delay)
         return ToolResult(call.tool_use_id, json.dumps({"timer_id": timer_id, "fires_at": fires_at}))
@@ -314,7 +345,6 @@ class SessionWorkflow:
             )
         if approval.status == "denied":
             return ToolResult(call.tool_use_id, "The user declined this action. Nothing was done.", True)
-        # Approved: the tool re-checks the grant when it executes.
         call.approval = ApprovalGrant(approval.approval_id, approval.digest, approval.expires_at)
         return await execute_tool(call)
 

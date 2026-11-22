@@ -6,6 +6,15 @@ Two integration styles share these:
   scheduling helper submits as a Standalone Activity (now or after a delay).
 * Fine-grained: ``call_model`` and ``run_tool`` are single operations that a
   Workflow strings together, so Temporal records each result separately.
+
+An Activity is where anything non-deterministic belongs: model calls, tools,
+email, the clock. Temporal retries an Activity that fails or whose worker
+dies, so each one here is written to be safe to run twice. A delivery is keyed
+by message id and a report by turn id, so a second attempt finds the first
+attempt's work instead of repeating it.
+
+The ``maybe_fail`` calls are fault points for the recovery drills. They do
+nothing unless a drill turns them on.
 """
 
 from __future__ import annotations
@@ -131,6 +140,8 @@ class AgentActivities:
             await self._temporal.get_workflow_handle(wake.session_workflow_id).signal("timer_fired", wake)
             return "woke the session"
         except RPCError as err:
+            # agent(constraint): signalling a Workflow that has already closed also returns
+            # NOT_FOUND. That is the case this fallback exists for.
             if err.status != RPCStatusCode.NOT_FOUND:
                 raise
         await asyncio.to_thread(

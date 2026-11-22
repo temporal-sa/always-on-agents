@@ -3,6 +3,12 @@
 It is called only from Activities. Retries belong to Temporal, so the
 Anthropic client is created with ``max_retries=0`` and errors are classified
 into retryable and non-retryable ``ApplicationError``s.
+
+Why not let the SDK retry too? Two retry layers multiply. With the SDK's
+default of two retries, ten Temporal attempts could make thirty calls, and
+Temporal's history would show only ten. With one layer, the Activity's retry
+policy is the whole story. A rate limit's ``retry-after`` becomes
+``next_retry_delay``, so Temporal waits exactly as long as the API asked.
 """
 
 from __future__ import annotations
@@ -27,6 +33,8 @@ class ModelClient(Protocol):
 
 def build_model(settings: Settings, store: AppStore, client: ModelClient | None = None) -> ModelClient:
     """The model every Activity uses: Claude, with each call recorded in the operation log."""
+    # agent(invariant): always Claude. ``client`` exists only for tests/fake_model.py. Don't add
+    # a scripted, offline, or fallback model; the owner removed one on purpose.
     return LoggedModel(client or ClaudeModel(settings.claude_model), store)
 
 

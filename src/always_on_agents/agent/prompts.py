@@ -196,9 +196,11 @@ SESSION_TOOLS = [
 MAX_DELAY_SECONDS = 30 * 24 * 3600
 
 # Tools whose effects reach other people. The session asks for approval before
-# running them, and the tool re-checks that approval when it executes.
+# running them.
 APPROVAL_REQUIRED = {"share_report"}
 
 # Per-tool Activity timeouts (seconds). get_research_result may wait on a job.
+# agent(constraint): must exceed RESEARCH_WAIT_SECONDS (agent/tools.py), or the wait times out
+# the Activity instead of returning "running".
 TOOL_TIMEOUTS = {"get_research_result": 120}
 DEFAULT_TOOL_TIMEOUT = 30

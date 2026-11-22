@@ -48,8 +48,28 @@ src/always_on_agents/
   activities/          agent, research, memory, workspace Activities, plus background heartbeats
   workflows/           briefing turn and research tool, memory, workspace pool and lease, session
   web/                 FastAPI server and a no-build HTML/JS frontend (`agent-web`)
-tests/                 44 tests against a local dev server
+tests/                 tests against a local dev server
+AGENTS.md              rules for coding agents and the commands that check a change (CLAUDE.md imports it)
+llms.txt               an index of the patterns, for LLM retrieval
 ```
+
+## Reading the code
+
+The code carries two sets of comments, written for different readers.
+
+- **For people:** module docstrings teach each pattern: the problem, how
+  Temporal solves it, what to notice in the code, and which drill shows it
+  happening. Short inline comments explain the reason behind a decision. A
+  good reading order is `workflows/agent_loop.py`, `scheduling.py`,
+  `workflows/memory.py`, `workflows/session.py`, then `workflows/workspace.py`.
+- **For coding agents:** [`AGENTS.md`](AGENTS.md) holds the repo-wide rules
+  and the test and lint commands. Inline, a comment starting
+  `agent(invariant)`, `agent(trade-off)`, or `agent(constraint)` marks a rule
+  that an edit could break without a nearby test failing: an ordering that
+  prevents lost work, an ID that makes a retry safe, a string another file
+  matches. These notes are deliberately few, and never repeat what the code
+  already says. `grep -rn "agent(" src tests` lists them.
+  [`llms.txt`](llms.txt) indexes the patterns for retrieval.
 
 ## Quickstart
 
@@ -393,7 +413,7 @@ are application decisions.
 uv run pytest
 ```
 
-44 tests run in about a minute. They use the installed `temporal` CLI as a
+The tests run in about a minute. They use the installed `temporal` CLI as a
 local dev server (or download one). So they're free and repeatable, they
 substitute a deterministic test double for Claude
 ([`tests/fake_model.py`](tests/fake_model.py)); the application never uses it.

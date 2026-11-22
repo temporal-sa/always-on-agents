@@ -1,9 +1,27 @@
 """The agent loop in Workflow code: the fine-grained integration.
 
-Every model call and every tool call is its own Activity, so Temporal records
-each result. If a later step fails, recovery replays the recorded model
-decisions and tool results instead of repeating them, then continues with new
-decisions. The model is still free to choose its next action.
+An agent turn alternates between asking the model what to do and doing it.
+Here the loop itself is Workflow code, and every model call and every tool
+call is its own Activity, so Temporal records each result in the Workflow's
+history. If the worker dies at step five, recovery replays steps one to four
+from that history (no new model calls, no repeated tools) and carries on from
+there. The model still chooses every next step; Temporal remembers the
+choices it already made.
+
+Compare the coarse integration, ``run_briefing_turn`` in
+``activities/agent.py``: one Activity wraps the whole loop, so a retry repeats
+everything inside it. That is simpler, and fine when a turn is cheap.
+
+What to notice:
+
+* The model's reply is an Activity result. That is what makes the loop
+  deterministic on replay, even though the model itself is not.
+* Tools that affect other people go through an approval gate that the calling
+  Workflow supplies. The briefing Workflow supplies none, so they are refused.
+* Independent tool calls run in parallel with ``asyncio.gather``. That is safe
+  in Workflow code: Temporal's event loop schedules them deterministically.
+
+See it happen: recovery drills 2 and 3 in the README.
 """
 
 from __future__ import annotations
@@ -86,6 +104,8 @@ class WorkflowAgentLoop:
                     system=self._system,
                     messages=messages,
                     tools=self._tools,
+                    # agent(invariant): the same call gets the same key on every attempt, which is
+                    # how the operation log shows a repeat. agent/runtime.py uses the same format.
                     log_key=f"{self._turn_id}#{self.model_calls}",
                 ),
                 start_to_close_timeout=timedelta(minutes=5),
@@ -100,11 +120,12 @@ class WorkflowAgentLoop:
             if not uses:
                 return final_text(response.content)
             self.tools_called += [u["name"] for u in uses]
-            # Independent tool calls run in parallel; results go back together.
             results = await asyncio.gather(*(self._run_tool(u) for u in uses))
             content = [tool_result_block(r) for r in results]
             if self._drain_joined:
                 # Messages that joined this turn while tools ran.
+                # agent(constraint): the Claude API needs tool_result blocks first in this
+                # message, so joined text is appended after them, never before.
                 content += self._drain_joined()
             messages.append({"role": "user", "content": content})
         raise ApplicationError("Agent exceeded its iteration limit.", type="AgentLoopLimit", non_retryable=True)
@@ -116,6 +137,8 @@ class WorkflowAgentLoop:
         if use["name"] in self._local_tools:
             return await self._local_tools[use["name"]](call)
         if use["name"] in APPROVAL_REQUIRED:
+            # agent(invariant): an approval-required tool never reaches execute_tool without
+            # the gate. With no gate (briefings), it is refused.
             if self._approval_gate is None:
                 return ToolResult(call.tool_use_id, f"{call.name} is not available here.", is_error=True)
             return await self._approval_gate(call)

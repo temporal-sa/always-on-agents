@@ -10,6 +10,15 @@
   which interactions it covers in one transaction. If the memory database is
   down, publication retries on its own, from the saved proposal, without a new
   model call. If retries run out, the Workflow asks an operator and waits.
+
+The idea to take away: save the expensive result before the risky step. The
+model pass is slow and costs money; the database write is cheap but can fail.
+Because the proposal is saved first, a database outage costs retries of the
+write, never a second model pass, and the batch ID makes every step safe to
+repeat.
+
+See it happen: recovery drill 4 in the README, or the Memory and Operations
+pages in the web UI.
 """
 
 from __future__ import annotations
@@ -101,6 +110,7 @@ class MemoryConsolidationWorkflow:
 
             info = workflow.info()
             # Stable per batch: a retried preparation reloads the same record.
+            # agent(constraint): batch_run() and the web alert-retry route parse this format.
             batch_id = f"{info.workflow_id}/{info.run_id}/batch-{self._batches}"
             self._batches += 1
             self._status = "preparing"
@@ -122,6 +132,8 @@ class MemoryConsolidationWorkflow:
                     self._flush = True
                     continue
                 self._published.append(result.revision)
+            # agent(invariant): _pending is only a hint counted from signals. The database's
+            # unprocessed interactions are the truth, so an empty batch resets it to zero.
             self._pending = max(0, self._pending - covered) if covered else 0
             self._first_pending_at = workflow.now() if self._pending else None
 
@@ -141,6 +153,8 @@ class MemoryConsolidationWorkflow:
 
         # Nothing pending: finish. The next interaction starts a new run with the
         # same Workflow ID via signal-with-start.
+        # agent(trade-off): ending when idle is deliberate (no idle wait, no endless run);
+        # app.notify_consolidation restarts it.
         self._status = "idle"
         await workflow.wait_condition(workflow.all_handlers_finished)
         return ConsolidationOutcome(request.user_id, self._published)
@@ -173,6 +187,9 @@ class MemoryConsolidationWorkflow:
                         backoff_coefficient=2.0,
                         maximum_interval=timedelta(seconds=30),
                         maximum_attempts=request.max_publish_attempts,
+                        # agent(constraint): matches the class name of store.StaleBatchError. Temporal
+                        # types a plain exception by its class name, so renaming it makes stale
+                        # batches retry until an operator is paged.
                         non_retryable_error_types=["StaleBatchError"],
                     ),
                     summary="publish memory revision",
@@ -185,7 +202,9 @@ class MemoryConsolidationWorkflow:
                 # Retries are exhausted. Keep the saved proposal, ask a human,
                 # and wait. Nothing is lost while we wait, even across restarts.
                 self._status = "waiting_for_operator"
-                self._operator_retry = False  # before the alert, so an early retry is kept
+                # agent(invariant): reset before the alert is sent, so a retry signal that
+                # arrives while it is being sent is not lost.
+                self._operator_retry = False
                 await workflow.execute_activity_method(
                     MemoryActivities.notify_operator,
                     OperatorAlert(
