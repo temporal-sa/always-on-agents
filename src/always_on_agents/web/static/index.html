@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Briefing Assistant</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M9 10h14M9 16h14M9 22h9' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+            <rect width="32" height="32" rx="8" fill="var(--accent)" />
+            <path d="M9 10h14M9 16h14M9 22h9" stroke="#fff" stroke-width="2.5" stroke-linecap="round" />
+          </svg>
+          <div>
+            <div class="brand-name">Briefing Assistant</div>
+            <div class="brand-sub">always-on agent on Temporal</div>
+          </div>
+        </div>
+        <nav class="nav" aria-label="Views">
+          <a href="#assistant" data-view="assistant"><span class="nav-icon">💬</span>Assistant</a>
+          <a href="#briefings" data-view="briefings"><span class="nav-icon">🗓</span>Briefings</a>
+          <a href="#memory" data-view="memory"><span class="nav-icon">🧠</span>Memory</a>
+          <a href="#workspace" data-view="workspace"><span class="nav-icon">🖥</span>Workspace</a>
+          <a href="#operations" data-view="operations"><span class="nav-icon">🛠</span>Operations</a>
+        </nav>
+        <div class="sidebar-foot">
+          <label class="field">
+            <span>Signed in as</span>
+            <input id="user" autocomplete="off" spellcheck="false" />
+          </label>
+          <div id="env" class="env"></div>
+        </div>
+      </aside>
+      <main id="view" class="main" tabindex="-1"></main>
+    </div>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
