@@ -33,6 +33,9 @@ def load_dotenv(path: Path | str = ".env") -> None:
             os.environ[key] = value
 
 
+PROVIDERS = ("anthropic", "bedrock", "openai")
+
+
 @dataclass(frozen=True)
 class Settings:
     # Separate task queues let interactive turns, scheduled automations, and
@@ -48,7 +51,24 @@ class Settings:
     # Where the "application database" (SQLite) and fake VM/snapshot files live.
     data_dir: Path = field(default_factory=lambda: Path(".data"))
 
+    # Which service the agent's model runs on: "anthropic" (the Claude API),
+    # "bedrock" (Claude on Amazon Bedrock), or "openai". Each has its own model
+    # setting, so switching providers is one variable.
+    model_provider: str = "anthropic"
     claude_model: str = "claude-opus-5-5"
+    bedrock_model: str = "anthropic.claude-opus-5-5"
+    openai_model: str = "gpt-6.2-sol"
+
+    def __post_init__(self) -> None:
+        if self.model_provider not in PROVIDERS:
+            raise ValueError(f"AGENT_MODEL_PROVIDER must be one of {', '.join(PROVIDERS)}, not {self.model_provider!r}")
+
+    @property
+    def model_id(self) -> str:
+        """The model the configured provider runs."""
+        return {"anthropic": self.claude_model, "bedrock": self.bedrock_model, "openai": self.openai_model}[
+            self.model_provider
+        ]
 
     @property
     def db_path(self) -> Path:
@@ -66,5 +86,8 @@ class Settings:
             background_queue=os.environ.get("AGENT_BACKGROUND_QUEUE", cls.background_queue),
             pool_workflow_id=os.environ.get("AGENT_POOL_WORKFLOW_ID", cls.pool_workflow_id),
             data_dir=Path(os.environ.get("AGENT_DATA_DIR", ".data")),
+            model_provider=os.environ.get("AGENT_MODEL_PROVIDER", cls.model_provider).strip().lower(),
             claude_model=os.environ.get("AGENT_CLAUDE_MODEL", cls.claude_model),
+            bedrock_model=os.environ.get("AGENT_BEDROCK_MODEL", cls.bedrock_model),
+            openai_model=os.environ.get("AGENT_OPENAI_MODEL", cls.openai_model),
         )

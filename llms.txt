@@ -1,6 +1,6 @@
 # Always-on agents on Temporal
 
-> A runnable Temporal reference implementation, in Python, of an always-on AI agent: a briefing assistant on Claude that schedules work, runs agent turns durably, keeps long-term memory, manages sandbox workspaces, and asks a person for approval. It is built with the Temporal Python SDK (`temporalio` 1.36.1), Python 3.12, and the Anthropic Python SDK.
+> A runnable Temporal reference implementation, in Python, of an always-on AI agent: a briefing assistant that schedules work, runs agent turns durably, keeps long-term memory, manages sandbox workspaces, and asks a person for approval. It runs on Claude by default, or on Claude through Amazon Bedrock, or on OpenAI models. It is built with the Temporal Python SDK (`temporalio` 1.36.1), Python 3.12, the Anthropic Python SDK, and the OpenAI Python SDK.
 
 Each entry below names one durable-execution pattern, the Temporal API that implements it, and the file that shows it. The code comments explain the reasoning. Lines tagged `agent(invariant|trade-off|constraint)` state rules that must hold when the code changes.
 
@@ -15,7 +15,8 @@ Each entry below names one durable-execution pattern, the Temporal API that impl
 - [activities/agent.py: run_briefing_turn](src/always_on_agents/activities/agent.py): Coarse integration. One Activity wraps a whole agent turn, so a retry repeats every model and tool call. Heartbeats run in the background.
 - [workflows/agent_loop.py: WorkflowAgentLoop](src/always_on_agents/workflows/agent_loop.py): Fine-grained integration. Workflow code runs the loop, and each model call and tool call is its own Activity, so replay reuses results that were already recorded.
 - [workflows/briefing.py: ResearchWorkflow](src/always_on_agents/workflows/briefing.py): A Workflow implementing a long-running tool. It returns a job ID at once, and `WorkflowIDConflictPolicy.USE_EXISTING` makes a retried call return the same job.
-- [llm.py](src/always_on_agents/llm.py): The Claude client with `max_retries=0`. Errors become retryable or non-retryable `ApplicationError`, and a rate limit sets `next_retry_delay` from the `retry-after` header.
+- [llm.py](src/always_on_agents/llm.py): Model clients for the Claude API and Amazon Bedrock (`AsyncAnthropicBedrockMantle`), selected by `AGENT_MODEL_PROVIDER`. Each uses `max_retries=0`, so Temporal owns retries. Errors become retryable or non-retryable `ApplicationError`, and a rate limit sets `next_retry_delay` from the `retry-after` header.
+- [llm_openai.py](src/always_on_agents/llm_openai.py): OpenAI models through the Responses API, with `store=False`. The adapter translates the Claude-format conversation kept in Workflow state to and from Responses API items, and carries encrypted reasoning items between calls.
 
 ## Memory consolidation
 
