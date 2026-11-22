@@ -248,7 +248,8 @@ function renderEnv() {
     fill(env, el("div", { class: "row" }, badge("Server unreachable", "bad")));
     return;
   }
-  const model = badge(`Claude · ${c.claude_model}`, "accent");
+  const provider = { anthropic: "Claude", bedrock: "Claude on Bedrock", openai: "OpenAI" }[c.model_provider] || c.model_provider;
+  const model = badge(`${provider} · ${c.model}`, "accent");
   fill(env, 
     el("div", { class: "row" }, model),
     el("div", { class: "row" }, "Namespace ", el("code", {}, c.namespace)),

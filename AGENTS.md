@@ -1,7 +1,8 @@
 # AGENTS.md
 
 A Temporal reference implementation (Python 3.12, `temporalio` 1.36.1) of an
-always-on briefing agent that runs on Claude. `README.md` maps each article
+always-on briefing agent that runs on Claude by default, or on Claude via
+Amazon Bedrock or OpenAI models (`AGENT_MODEL_PROVIDER`). `README.md` maps each article
 section to the code. This file lists the rules an edit must keep.
 
 ## Check every change
@@ -13,7 +14,8 @@ node --check src/always_on_agents/web/static/app.js
 ```
 
 - **pytest** starts a local Temporal dev server and takes about a minute.
-- **Tests never call Claude:** they inject `tests/fake_model.py`, so they need no API key.
+- **Tests never call a model:** they inject `tests/fake_model.py`, and the
+  client tests use mock HTTP transports, so no API key is needed.
 - **Replay check:** a test that ends with `assert_replays(handle)` replays the
   history it just produced against the current code.
   - It catches non-determinism.
@@ -22,10 +24,14 @@ node --check src/always_on_agents/web/static/app.js
 
 ## Rules
 
-- **The app always runs on Claude.**
-  - Never add a scripted, offline, mock or fallback model path under `src/`. The owner removed one on purpose.
-  - The worker refuses to start without Claude access, by design.
+- **The app always runs on a real model** from the configured provider: `anthropic`, `bedrock` or `openai`.
+  - Never add a scripted, offline or mock model path under `src/`. The owner removed one on purpose.
+  - The worker refuses to start without access to the configured provider, by design.
   - The only test double is `tests/fake_model.py`, passed in through `build_workers(model=...)`.
+- **The conversation format is Claude Messages everywhere**: Workflow state, `ModelRequest`, `ModelResponse`.
+  - Provider differences stay inside the model clients (`llm.py`, `llm_openai.py`).
+  - A new provider is a new client with `complete(ModelRequest) -> ModelResponse` that translates at the edge.
+  - Never put provider-specific branches in Workflows or the agent loop.
 - **Never read, print or commit `.env`.** It holds the API key.
 - **Workflow code (`workflows/`) is deterministic.**
   - No I/O.
@@ -44,7 +50,7 @@ node --check src/always_on_agents/web/static/app.js
   - Call `continue_as_new` only after `workflow.all_handlers_finished`.
 - **`AppStore` is blocking SQLite.** Async Activities call it through `asyncio.to_thread`. A direct call blocks the event loop and stalls heartbeats.
 - **Retries belong to Temporal.**
-  - The Anthropic client uses `max_retries=0`.
+  - Every SDK client uses `max_retries=0`.
   - Classify errors in `llm.py` as retryable or non-retryable `ApplicationError` instead of adding retry loops.
 - **Register new Activities and Workflows** in `worker.build_workers` / `WORKFLOWS`.
 - **Keep the structure flat.** This is a reference implementation meant to be read top to bottom:

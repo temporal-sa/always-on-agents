@@ -6,8 +6,9 @@ schedule, delivers it, and remembers the user's feedback for next time. Each
 pattern the article describes is implemented as working Temporal code, with
 tests and recovery drills you can run on a laptop.
 
-The agent runs on Claude (`claude-opus-5-5`), so you need a Claude API key or
-an `ant auth login` sign-in to run it.
+The agent runs on Claude (`claude-opus-5-5`) by default, so you need a Claude
+API key or an `ant auth login` sign-in to run it. It can also run on Claude
+through Amazon Bedrock, or on OpenAI models (see [Model providers](#model-providers)).
 
 ## Article to code
 
@@ -41,7 +42,8 @@ src/always_on_agents/
   worker.py            one worker process for the interactive, scheduled, and background queues
   cli.py               `agent` command for demos and drills
   domain.py            dataclasses passed between clients, Workflows, and Activities
-  llm.py               the Claude client (Messages API), with Temporal-friendly error handling
+  llm.py               model clients: Claude (Claude API or Bedrock), Temporal-friendly error handling
+  llm_openai.py        OpenAI models (Responses API), translated to and from the Claude message format
   store.py             the application's own systems, simulated: SQLite memory store, reports,
                        outbox, fake VM provider and snapshots, operation log, fault injection
   agent/               prompts and tools, the in-process agent loop, message helpers
@@ -85,7 +87,8 @@ uv sync
 ```
 
 Copy the example settings, then put your Claude API key in `.env` (or skip
-the key and run `ant auth login`):
+the key and run `ant auth login`). To use Bedrock or OpenAI instead, see
+[Model providers](#model-providers).
 
 ```bash
 cp .env.example .env
@@ -163,20 +166,51 @@ tool: it binds to `127.0.0.1` and has no authentication.
   retries, its alert has a **Retry publication** button that sends
   `retry_publication` to the waiting Workflow.
 
-### The Claude client
+### Model providers
 
-The worker checks your credentials with a free model lookup before it starts,
-and exits with a clear message if they're missing. Credentials come from
-`ANTHROPIC_API_KEY` or an `ant auth login` profile. The worker and CLI also
-load a `.env` file from the current directory (copy
-[`.env.example`](.env.example)); variables already set in your shell win, and
-blank values are ignored. The model is `claude-opus-5-5`; override it with
-`AGENT_CLAUDE_MODEL`. Requests set
-`effort` explicitly, use structured output for memory proposals, and opt into
-server-side refusal fallbacks (`fallbacks: "default"`). The Anthropic client
-runs with `max_retries=0` so Temporal owns retries. Errors are classified as
-retryable (429, 5xx, connection) or not (400, 401, 403, 404), and `retry-after`
-becomes the next retry delay.
+`AGENT_MODEL_PROVIDER` picks where the model runs. Set it in `.env` and
+restart the worker and the web server.
+
+| Provider | Credentials | Model setting (default) |
+|---|---|---|
+| `anthropic` (default) | `ANTHROPIC_API_KEY` or an `ant auth login` profile | `AGENT_CLAUDE_MODEL` (`claude-opus-5-5`) |
+| `bedrock` | `AWS_REGION`, plus `AWS_BEARER_TOKEN_BEDROCK` or standard AWS credentials (environment, profile, SSO). Run `uv sync --extra bedrock` first. | `AGENT_BEDROCK_MODEL` (`anthropic.claude-opus-5-5`) |
+| `openai` | `OPENAI_API_KEY` | `AGENT_OPENAI_MODEL` (`gpt-6.2-sol`) |
+
+The worker checks the provider before it starts and exits with a clear
+message if something is missing. For the Claude API and OpenAI it does a
+free model lookup. Bedrock has no free lookup, so the worker checks the AWS
+libraries, the region and the credentials locally. The worker and CLI load a
+`.env` file from the current directory (copy [`.env.example`](.env.example)).
+Variables already set in your shell win, and blank values are ignored.
+
+**The same everywhere:**
+
+- Every client runs with `max_retries=0`, so Temporal owns retries.
+- Errors are classified as retryable (429, 5xx, connection) or not (400,
+  401, 403, 404, and OpenAI's `insufficient_quota`). `retry-after` becomes
+  the next retry delay.
+- Requests set `effort` explicitly, and memory proposals use structured
+  output.
+
+**Different per provider:**
+
+- **Claude API:** opts into server-side refusal fallbacks (`fallbacks: "default"`).
+- **Bedrock:** uses Anthropic's Bedrock client (`AsyncAnthropicBedrockMantle`).
+  Server-side fallbacks aren't offered there, so the SDK's client-side
+  fallback middleware retries a refused request on Claude Opus 4.8. The
+  Bedrock adapter has no automated tests.
+- **OpenAI:** uses the Responses API with `store=False`. The conversation
+  stays in the Claude message format in Workflow state, and
+  [`llm_openai.py`](src/always_on_agents/llm_openai.py) translates each
+  request and reply. Encrypted reasoning items are carried in the
+  conversation, so the model keeps its reasoning across tool calls. There is
+  no refusal fallback: a refusal fails the turn without a retry, as it does
+  on Claude when every fallback declines.
+
+Because the format in Workflow state doesn't change, you can switch provider
+with sessions still open. Each adapter skips the blocks only the other
+provider can read.
 
 ### Temporal Cloud
 
@@ -417,7 +451,8 @@ The tests run in about a minute. They use the installed `temporal` CLI as a
 local dev server (or download one). So they're free and repeatable, they
 substitute a deterministic test double for Claude
 ([`tests/fake_model.py`](tests/fake_model.py)); the application never uses it.
-The Claude client itself is tested against a mock HTTP transport. The tests
+The Claude and OpenAI clients are tested against a mock HTTP transport,
+including a whole agent turn through the OpenAI adapter. The tests
 cover:
 
 - scheduling and duplicate rejection, and a delayed job outliving a worker
