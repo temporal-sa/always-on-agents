@@ -80,6 +80,8 @@ class WorkspaceActivities:
     @activity.defn
     async def claim_vm(self, request: ClaimRequest) -> str:
         """Claim a ready VM from the pool (waits in the pool's queue if none is ready)."""
+        # agent(constraint): Workflows can't send Updates to other Workflows, so the lease
+        # claims through this Activity. Its 10-minute timeout bounds the wait in line.
         pool = self._temporal.get_workflow_handle(self._pool_workflow_id)
         return await pool.execute_update("claim", request, result_type=str)
 

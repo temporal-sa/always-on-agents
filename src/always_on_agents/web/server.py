@@ -52,6 +52,7 @@ from ..workflows.memory import PUBLICATION_FAILED, MemoryConsolidationWorkflow, 
 from ..workflows.workspace import WorkspaceLeaseWorkflow, WorkspacePoolWorkflow, lease_workflow_id
 
 STATIC_DIR = Path(__file__).parent / "static"
+# agent(constraint): web/static/app.js has the same SAFE_ID pattern. Change both.
 SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,48}$")
 SAFE_FILE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$")
 STREAM_POLL_SECONDS = 0.5
@@ -229,7 +230,8 @@ def create_app(client: Client | None = None, settings: Settings | None = None) -
     async def reports(user: str) -> list[dict[str, Any]]:
         return await asyncio.to_thread(store.reports, _check_id(user, "user"))
 
-    # Report IDs from chat sessions contain a slash (``session-x/turn-3``).
+    # agent(constraint): report ids from chat sessions contain a slash (``session-x/turn-3``),
+    # hence the :path converter.
     @api.get("/api/reports/{report_id:path}")
     async def report(report_id: str) -> dict[str, Any]:
         found = await asyncio.to_thread(store.get_report, report_id)
@@ -432,6 +434,8 @@ def create_app(client: Client | None = None, settings: Settings | None = None) -
     async def _waiting_for_operator(workflow_id: str, run_id: str) -> bool:
         handle = tc().get_workflow_handle(workflow_id)
         desc = await _not_found_ok(handle.describe())
+        # agent(invariant): match the run id too. An alert from an earlier run must not
+        # offer a retry to a later one.
         if desc is None or desc.status != WorkflowExecutionStatus.RUNNING or desc.run_id != run_id:
             return False
         state = await handle.query(MemoryConsolidationWorkflow.status)

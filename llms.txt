@@ -1,0 +1,52 @@
+# Always-on agents on Temporal
+
+> A runnable Temporal reference implementation, in Python, of an always-on AI agent: a briefing assistant on Claude that schedules work, runs agent turns durably, keeps long-term memory, manages sandbox workspaces, and asks a person for approval. It is built with the Temporal Python SDK (`temporalio` 1.36.1), Python 3.12, and the Anthropic Python SDK.
+
+Each entry below names one durable-execution pattern, the Temporal API that implements it, and the file that shows it. The code comments explain the reasoning. Lines tagged `agent(invariant|trade-off|constraint)` state rules that must hold when the code changes.
+
+## Scheduling
+
+- [scheduling.py: schedule_briefing](src/always_on_agents/scheduling.py): Runs work now or later through one path. `Client.start_activity` starts a Standalone Activity, with `start_delay` holding it until it is due, so the application needs no timer table or poller. `ActivityIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY` stops a second submission of the same briefing.
+- [scheduling.py: set_weekly_briefing_schedule](src/always_on_agents/scheduling.py): A recurring Temporal Schedule. It uses a `ScheduleCalendarSpec` with a `comment` and an IANA time zone, and `ScheduleOverlapPolicy.SKIP`. It is created with `create_schedule` and moved with `ScheduleHandle.update`.
+- [workflows/session.py: SessionWorkflow._set_timer](src/always_on_agents/workflows/session.py): The agent's own timer tool. It submits a delayed Standalone Activity that later signals the session Workflow.
+
+## Agent loop and recovery
+
+- [activities/agent.py: run_briefing_turn](src/always_on_agents/activities/agent.py): Coarse integration. One Activity wraps a whole agent turn, so a retry repeats every model and tool call. Heartbeats run in the background.
+- [workflows/agent_loop.py: WorkflowAgentLoop](src/always_on_agents/workflows/agent_loop.py): Fine-grained integration. Workflow code runs the loop, and each model call and tool call is its own Activity, so replay reuses results that were already recorded.
+- [workflows/briefing.py: ResearchWorkflow](src/always_on_agents/workflows/briefing.py): A Workflow implementing a long-running tool. It returns a job ID at once, and `WorkflowIDConflictPolicy.USE_EXISTING` makes a retried call return the same job.
+- [llm.py](src/always_on_agents/llm.py): The Claude client with `max_retries=0`. Errors become retryable or non-retryable `ApplicationError`, and a rate limit sets `next_retry_delay` from the `retry-after` header.
+
+## Memory consolidation
+
+- [workflows/memory.py: MemoryConsolidationWorkflow](src/always_on_agents/workflows/memory.py): Batches interactions by count or time.
+  - Messages arrive by signal-with-start.
+  - A saved proposal gives publication its own retry boundary.
+  - When retries run out, an operator is asked and the Workflow waits for a signal.
+  - Continue-As-New keeps history bounded.
+- [store.py: publish_batch](src/always_on_agents/store.py): Publishes in one transaction, with an optimistic base-revision check that raises a non-retryable `StaleBatchError`.
+- [app.py: consolidate_now](src/always_on_agents/app.py): A fixed per-user Workflow ID with `WorkflowIDConflictPolicy.FAIL`.
+
+## Workspaces
+
+- [workflows/workspace.py: WorkspacePoolWorkflow](src/always_on_agents/workflows/workspace.py): A hot-pool controller for sandbox VMs.
+  - VMs are claimed through a Workflow Update and released by signal.
+  - It runs health checks, cleans up orphans, rate-limits VM creation, and uses Continue-As-New.
+- [workflows/workspace.py: WorkspaceLeaseWorkflow](src/always_on_agents/workflows/workspace.py): Save-and-release. It saves the files, Temporal records the save, and only then is the VM released.
+
+## Sessions and approvals
+
+- [workflows/session.py: SessionWorkflow](src/always_on_agents/workflows/session.py): One Workflow per chat session.
+  - The `send_message` Update returns once a message is accepted, not when the work finishes.
+  - An approval binds to the digest of the exact tool parameters and expires at a deadline.
+  - Clients reconnect by reading events from an offset with a Query.
+- [web/server.py](src/always_on_agents/web/server.py): A FastAPI server that streams session events with Server-Sent Events and resumes from `Last-Event-ID`.
+
+## Testing
+
+- [tests/conftest.py](tests/conftest.py): Tests run against `WorkflowEnvironment.start_local`. `assert_replays` replays each Workflow's history with `Replayer` to catch non-determinism.
+- [README.md: Recovery drills](README.md): Fault injection and an operation log show what repeats after a crash and what doesn't.
+
+## Optional
+
+- [AGENTS.md](AGENTS.md): The rules for changing this code, and the commands that check a change.

@@ -3,7 +3,14 @@
 Kept free of I/O and heavy imports so Workflow modules can import it through
 the sandbox cheaply. Everything here is a plain dataclass, which Temporal's
 default data converter serializes to JSON.
+
+These shapes are also a contract with history. A Workflow that is waiting
+(a session, a Schedule, a paused memory batch) will be handed the same JSON
+after you deploy new code, so changes here have to be backward compatible.
 """
+
+# agent(constraint): payloads are JSON by field name. Add fields with defaults; don't rename
+# or remove fields that running Workflows or Schedules carry.
 
 from __future__ import annotations
 

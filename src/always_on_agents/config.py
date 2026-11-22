@@ -48,7 +48,6 @@ class Settings:
     # Where the "application database" (SQLite) and fake VM/snapshot files live.
     data_dir: Path = field(default_factory=lambda: Path(".data"))
 
-    # The Claude model the agent runs on.
     claude_model: str = "claude-opus-5-5"
 
     @property

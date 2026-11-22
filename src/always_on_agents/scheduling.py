@@ -9,6 +9,14 @@ no timer table or due-work poller.
 
 For recurring work, a Temporal Schedule starts a Workflow on a calendar. The
 assistant manages the user's weekly briefing Schedule from chat.
+
+Which to use: a Standalone Activity for one job at one time (a briefing
+"in an hour", a reminder), and a Schedule for "every Monday at 8". Both
+replace things an application would otherwise build itself: a table of due
+jobs, a poller, and the recovery logic for when the poller was down.
+
+See it happen: recovery drill 1 in the README (the worker is stopped through
+the due time, and the job still runs once).
 """
 
 from __future__ import annotations
@@ -69,7 +77,8 @@ async def schedule_briefing(
             heartbeat_timeout=timedelta(seconds=30),  # notice a dead worker quickly
             start_delay=delay,
             id_reuse_policy=ActivityIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
-            # Each attempt repeats the whole turn, model calls included, so cap it.
+            # agent(trade-off): each attempt repeats the whole turn, model calls included,
+            # so attempts are capped here, unlike the fine-grained loop's per-call retries.
             retry_policy=RetryPolicy(initial_interval=timedelta(seconds=10), maximum_attempts=5),
         )
     except ActivityAlreadyStartedError:
@@ -114,7 +123,7 @@ async def handle_inbox_event(
     return await schedule_briefing(client, user_id, due=f"event-{event_id}", task_queue=task_queue)
 
 
-# Temporal numbers the days of the week from Sunday.
+# agent(constraint): Temporal numbers the days of the week from Sunday = 0.
 WEEKDAYS = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")
 DAY_NAMES = dict(
     zip(WEEKDAYS, ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"), strict=True)
@@ -168,6 +177,9 @@ async def set_weekly_briefing_schedule(
                     day_of_week=[ScheduleRange(WEEKDAYS.index(day))],
                     hour=[ScheduleRange(hour)],
                     minute=[ScheduleRange(minute)],
+                    # agent(constraint): describe_weekly_briefing reads this comment back. The
+                    # server rewrites cron_expressions into calendars and drops the cron text,
+                    # so don't switch to cron here.
                     comment=f"{DAY_NAMES[day]}s at {hour:02d}:{minute:02d}",
                 )
             ],
@@ -226,6 +238,9 @@ async def ensure_nightly_memory_schedule(
                 action=ScheduleActionStartWorkflow(
                     MemoryConsolidationWorkflow.run,
                     ConsolidationInput(user_id=user_id, flush_now=True),
+                    # agent(trade-off): a Schedule appends the run time to this id, so nightly runs
+                    # can't share the per-user consolidation id and may overlap it. That is safe:
+                    # store.publish_batch raises StaleBatchError for the later publish.
                     id=f"memory-nightly-{user_id}",
                     task_queue=task_queue,
                 ),

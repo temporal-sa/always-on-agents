@@ -39,6 +39,9 @@ class ToolExecutor:
         self._scheduled_queue = scheduled_queue
 
     async def execute(self, call: ToolCall) -> ToolResult:
+        # agent(constraint): a tool is a method named _tool_<name> plus its definition in
+        # agent/prompts.py (and BRIEFING_TOOLS / SESSION_TOOLS). Tools that affect other
+        # people also go in APPROVAL_REQUIRED.
         handler = getattr(self, f"_tool_{call.name}", None)
         attempt = activity.info().attempt if activity.in_activity() else 1
         await asyncio.to_thread(self._store.log_op, f"tool:{call.name}", call.turn_id, attempt, call.tool_use_id)

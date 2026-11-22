@@ -78,6 +78,7 @@ class InjectedFault(RuntimeError):
     """Raised by ``maybe_fail`` to simulate a dependency outage."""
 
 
+# agent(constraint): workflows/memory.py names this class as a string in its retry policy.
 class StaleBatchError(RuntimeError):
     """The memory changed since a batch was prepared; its proposal can't be published."""
 
@@ -175,6 +176,8 @@ class AppStore:
         with self._conn() as conn:
             return [dict(r) for r in conn.execute("SELECT * FROM faults WHERE remaining > 0")]
 
+    # agent(constraint): the point names are listed in FAULT_POINTS (web/static/app.js) and the
+    # README drills. Add or rename them in all three places.
     def maybe_fail(self, point: str) -> None:
         with self._tx() as conn:
             row = conn.execute(

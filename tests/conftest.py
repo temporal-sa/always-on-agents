@@ -1,3 +1,20 @@
+"""Shared test setup: a real Temporal dev server, real workers, a fake model.
+
+The tests run the same Workflows and Activities as the app, against a local
+Temporal server, so what they exercise is real durable execution: timers,
+retries, signals, Updates, Continue-As-New. Only the model is replaced, by
+``fake_model.FakeModel``, so runs are free and repeatable.
+
+Two helpers carry most of the recovery tests:
+
+* ``running_workers`` is a context manager. Leaving the block stops the
+  workers, and entering a new one starts fresh ones: a worker restart in
+  two lines. Whatever was in flight resumes in the new workers.
+* ``assert_replays`` replays a finished Workflow's history against the
+  current code. If the code would make different decisions on replay (the
+  non-determinism Temporal forbids), it raises.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -40,6 +57,8 @@ def client(env: WorkflowEnvironment) -> Client:
 
 @pytest.fixture
 def settings(tmp_path) -> Settings:
+    # agent(invariant): tests share one dev server. Unique queues and pool id per test keep one
+    # test's worker from running another test's tasks.
     suffix = uuid.uuid4().hex[:8]
     return Settings(
         interactive_queue=f"interactive-{suffix}",
