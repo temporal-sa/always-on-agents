@@ -78,8 +78,8 @@ def store(settings: Settings) -> AppStore:
 async def running_workers(client: Client, settings: Settings, model: ModelClient | None = None) -> AsyncIterator[None]:
     """Run workers for all queues; leaving the block stops them (a 'restart').
 
-    Tests use a deterministic test double instead of Claude, so they are free
-    and repeatable. The application itself always runs on Claude.
+    Tests use a deterministic test double instead of a model, so they are free
+    and repeatable. The application itself always runs on real models.
     """
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
         async with contextlib.AsyncExitStack() as stack:

@@ -172,7 +172,8 @@ def create_app(client: Client | None = None, settings: Settings | None = None) -
     @api.get("/api/config")
     async def config() -> dict[str, Any]:
         return {
-            "claude_model": settings.claude_model,
+            "model_provider": settings.model_provider,
+            "model": settings.model_id,
             "namespace": tc().namespace,
             "temporal_ui": os.environ.get("TEMPORAL_UI_URL", "http://localhost:8233").rstrip("/"),
             "queues": list(settings.all_queues),

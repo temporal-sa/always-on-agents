@@ -29,7 +29,7 @@ from .activities.memory import MemoryActivities
 from .activities.research import ResearchActivities
 from .activities.workspace import WorkspaceActivities
 from .config import Settings, load_dotenv
-from .llm import ModelClient, build_model, verify_claude_access
+from .llm import ModelClient, build_model, verify_model_access
 from .store import AppStore
 from .workflows.briefing import BriefingTurnWorkflow, ResearchWorkflow
 from .workflows.memory import MemoryConsolidationWorkflow
@@ -61,7 +61,7 @@ def build_workers(
     *,
     model: ModelClient | None = None,
 ) -> list[Worker]:
-    """Workers for the given queues. ``model`` lets tests substitute a test double for Claude."""
+    """Workers for the given queues. ``model`` lets tests substitute a test double for the model."""
     store = AppStore(settings.data_dir)
     model = build_model(settings, store, model)
     agent = AgentActivities(store, model, client, settings)
@@ -100,7 +100,7 @@ def build_workers(
 
 async def run(queues: Sequence[str]) -> None:
     settings = Settings.from_env()
-    model_name = await verify_claude_access(settings.claude_model)
+    model_name = await verify_model_access(settings)
     client = await connect()
     with concurrent.futures.ThreadPoolExecutor(max_workers=32) as executor:
         workers = build_workers(client, settings, queues, executor)

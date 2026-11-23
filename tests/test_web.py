@@ -48,7 +48,7 @@ async def test_page_and_config(http):
     page = await http.get("/")
     assert page.status_code == 200 and "Briefing Assistant" in page.text
     config = await _json(http, "GET", "/api/config")
-    assert config["claude_model"] == "claude-opus-5-5"
+    assert (config["model_provider"], config["model"]) == ("anthropic", "claude-opus-5-5")
 
 
 async def test_briefings_view(http, client, settings, store):

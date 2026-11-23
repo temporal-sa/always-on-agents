@@ -15,7 +15,7 @@ from temporalio.exceptions import ApplicationError
 
 from always_on_agents.agent.prompts import BRIEFING_TOOLS, MEMORY_OUTPUT_SCHEMA
 from always_on_agents.domain import ModelRequest
-from always_on_agents.llm import ClaudeModel
+from always_on_agents.llm import OPENAI_REASONING, ClaudeModel
 
 TOOL_USE_RESPONSE = {
     "id": "msg_1",
@@ -110,3 +110,33 @@ async def test_errors_are_classified_for_temporal_retries(status, retryable):
     assert err.value.non_retryable is (not retryable)
     if status == 429:
         assert err.value.next_retry_delay is not None and err.value.next_retry_delay.total_seconds() == 7
+
+
+async def test_openai_reasoning_is_not_sent_to_claude():
+    """After a provider switch mid-conversation, OpenAI's reasoning blocks are dropped."""
+    seen: dict = {}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx2.Response(200, json=TOOL_USE_RESPONSE)
+
+    await _model(handler).complete(
+        ModelRequest(
+            purpose="session",
+            system="s",
+            messages=[
+                {"role": "user", "content": "hi"},
+                {
+                    "role": "assistant",
+                    "content": [{"type": OPENAI_REASONING, "item": {}}, {"type": "text", "text": "Hey."}],
+                },
+                {"role": "assistant", "content": [{"type": OPENAI_REASONING, "item": {}}]},
+                {"role": "user", "content": "again"},
+            ],
+        )
+    )
+    assert seen["body"]["messages"] == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": [{"type": "text", "text": "Hey."}]},
+        {"role": "user", "content": "again"},
+    ]
