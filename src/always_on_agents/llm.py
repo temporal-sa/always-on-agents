@@ -49,7 +49,7 @@ class ModelClient(Protocol):
 
 def build_model(settings: Settings, store: AppStore, client: ModelClient | None = None) -> ModelClient:
     """The model every Activity uses, with each call recorded in the operation log."""
-    # agent(invariant): always a real model from the configured provider. ``client`` exists
+    # agent(invariant): the app always runs on real models, from the configured provider. ``client`` exists
     # only for tests/fake_model.py. Don't add a scripted, offline, or mock model; the owner
     # removed one on purpose.
     return LoggedModel(client or provider_model(settings), store)

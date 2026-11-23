@@ -1,8 +1,9 @@
 """A deterministic test double for the model, used only by the test suite.
 
-It makes the same kinds of decisions Claude makes in this app (which tools to
-call, what to write), so tests are free, fast, and repeatable. The application
-itself always uses Claude; nothing under ``src/`` can select this.
+It makes the same kinds of decisions a real model makes in this app (which
+tools to call, what to write), so tests are free, fast, and repeatable. The
+application itself always runs on real models; nothing under ``src/`` can
+select this.
 """
 
 from __future__ import annotations

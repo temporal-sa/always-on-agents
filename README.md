@@ -449,8 +449,9 @@ uv run pytest
 
 The tests run in about a minute. They use the installed `temporal` CLI as a
 local dev server (or download one). So they're free and repeatable, they
-substitute a deterministic test double for Claude
-([`tests/fake_model.py`](tests/fake_model.py)); the application never uses it.
+substitute a deterministic test double for the model
+([`tests/fake_model.py`](tests/fake_model.py)). The application never uses it:
+it always runs on real models.
 The Claude and OpenAI clients are tested against a mock HTTP transport,
 including a whole agent turn through the OpenAI adapter. The tests
 cover:

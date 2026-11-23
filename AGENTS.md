@@ -24,7 +24,7 @@ node --check src/always_on_agents/web/static/app.js
 
 ## Rules
 
-- **The app always runs on a real model** from the configured provider: `anthropic`, `bedrock` or `openai`.
+- **The app always runs on real models**, from the configured provider: `anthropic`, `bedrock` or `openai`.
   - Never add a scripted, offline or mock model path under `src/`. The owner removed one on purpose.
   - The worker refuses to start without access to the configured provider, by design.
   - The only test double is `tests/fake_model.py`, passed in through `build_workers(model=...)`.
